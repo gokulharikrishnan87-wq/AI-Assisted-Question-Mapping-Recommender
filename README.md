@@ -36,7 +36,7 @@ cp .env.example .env
 ### 3. Run Streamlit UI
 
 ```bash
-streamlit run ui/app.py
+streamlit run src/mapper_copilot/ui.py
 ```
 
 Then upload two Excel files:
@@ -82,10 +82,9 @@ mapper-copilot/
 │   │   └── suggester.py       # Two-stage RAG: retrieve → reason
 │   ├── eval/
 │   │   └── harness.py         # Batch evaluation vs ground-truth (Hit@k, MRR, etc.)
-│   └── api/
-│       └── main.py            # FastAPI (secondary); /suggest, /evaluate, /health
-├── ui/
-│   └── app.py                 # Streamlit (primary); upload + demo + batch eval
+│   ├── api/
+│   │   └── main.py            # FastAPI (secondary); /suggest, /evaluate, /health
+│   └── ui.py                  # Streamlit (primary); interactive + batch mapping UI
 ├── tests/                     # pytest suite (offline, no Bedrock)
 ├── data/                      # Seed data (SLCP + RSC Excel files, mapper_data.json)
 ├── pyproject.toml             # Dependencies + project config
