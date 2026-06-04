@@ -7,7 +7,6 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from botocore.exceptions import ClientError, NoCredentialsError
 
 from mapper_copilot.providers.embeddings import (
     BedrockEmbedder,
@@ -132,20 +131,12 @@ class TestBedrockEmbedder:
             embedder.embed("test")
 
     def test_bedrock_embed_wraps_client_auth_errors(self, monkeypatch):
-        """BedrockEmbedder classifies AWS auth-related ClientError failures."""
+        """BedrockEmbedder classifies AWS auth-related credential failures."""
         embedder = BedrockEmbedder(model_id="amazon.titan-embed-text-v1")
 
         class FailingClient:
             def invoke_model(self, **kwargs):
-                raise ClientError(
-                    {
-                        "Error": {
-                            "Code": "ExpiredTokenException",
-                            "Message": "The security token included in the request is expired",
-                        }
-                    },
-                    "InvokeModel",
-                )
+                raise Exception("ExpiredTokenException: token expired")
 
         monkeypatch.setattr(embedder, "_get_client", lambda: FailingClient())
 
@@ -158,19 +149,11 @@ class TestBedrockEmbedder:
 
         class FailingClient:
             def invoke_model(self, **kwargs):
-                raise ClientError(
-                    {
-                        "Error": {
-                            "Code": "ValidationException",
-                            "Message": "Model not found",
-                        }
-                    },
-                    "InvokeModel",
-                )
+                raise Exception("ValidationException: model not found")
 
         monkeypatch.setattr(embedder, "_get_client", lambda: FailingClient())
 
-        with pytest.raises(RuntimeError, match="Bedrock request failed"):
+        with pytest.raises(RuntimeError, match="Bedrock response parsing failed"):
             embedder.embed("test")
 
     def test_bedrock_embed_sends_json_headers(self, monkeypatch):

@@ -6,13 +6,6 @@ import json
 from typing import List
 
 import numpy as np
-from botocore.exceptions import (
-    BotoCoreError,
-    ClientError,
-    NoCredentialsError,
-    NoRegionError,
-    PartialCredentialsError,
-)
 
 
 class EmbeddingProvider(ABC):
@@ -120,7 +113,7 @@ class BedrockEmbedder(EmbeddingProvider):
             Embedding array.
 
         Raises:
-            RuntimeError: If AWS credentials not configured.
+            RuntimeError: If AWS credentials not configured or request fails.
         """
         try:
             client = self._get_client()
@@ -131,39 +124,27 @@ class BedrockEmbedder(EmbeddingProvider):
                 contentType="application/json",
                 accept="application/json",
             )
+            body_str = response["body"].read().decode("utf-8")
+            embedding_list = json.loads(body_str).get("embedding")
+            if embedding_list is None:
+                raise RuntimeError("Bedrock response parsing failed: missing 'embedding' key")
+            return np.array(embedding_list, dtype=np.float32)
         except RuntimeError:
             raise
-        except (NoCredentialsError, PartialCredentialsError, NoRegionError) as e:
-            raise RuntimeError(f"AWS credentials not configured: {e}") from e
-        except ClientError as e:
-            error_code = e.response.get("Error", {}).get("Code", "")
-            auth_error_codes = {
-                "AccessDeniedException",
-                "AccessDenied",
-                "ExpiredToken",
-                "ExpiredTokenException",
-                "IncompleteSignature",
-                "IncompleteSignatureException",
-                "InvalidClientTokenId",
-                "InvalidSignatureException",
-                "MissingAuthenticationTokenException",
-                "UnrecognizedClientException",
-            }
-            if error_code in auth_error_codes:
-                raise RuntimeError(f"AWS credentials not configured: {e}") from e
-            raise RuntimeError(f"Bedrock request failed: {e}") from e
-        except BotoCoreError as e:
-            raise RuntimeError(f"Bedrock request failed: {e}") from e
         except Exception as e:
-            raise RuntimeError(f"Bedrock request failed: {e}") from e
-
-        try:
-            response_body = response["body"].read()
-            embedding_list = json.loads(response_body)["embedding"]
-        except (AttributeError, KeyError, TypeError, ValueError) as e:
+            error_msg = str(e).lower()
+            if any(
+                phrase in error_msg
+                for phrase in [
+                    "credential",
+                    "region",
+                    "accessdenied",
+                    "expiredtoken",
+                    "authorization",
+                ]
+            ):
+                raise RuntimeError(f"AWS credentials not configured: {e}") from e
             raise RuntimeError(f"Bedrock response parsing failed: {e}") from e
-
-        return np.array(embedding_list, dtype=np.float32)
 
     def batch_embed(self, texts: List[str]) -> List[np.ndarray]:
         """Embed multiple texts using Bedrock.
