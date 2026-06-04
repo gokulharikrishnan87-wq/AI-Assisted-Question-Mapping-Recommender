@@ -1,0 +1,172 @@
+"""Domain models for Mapper Copilot."""
+
+from typing import List, Optional
+from pydantic import BaseModel, Field, ConfigDict
+
+
+class RscQuestion(BaseModel):
+    """RSC (Responsible Supply Chain) question."""
+
+    question_id: str = Field(..., description="Unique RSC question ID (e.g. '1.02')")
+    key: Optional[str] = Field(None, description="Key/identifier for the RSC question")
+    description: str = Field(..., description="Full text of the RSC question")
+    section: Optional[str] = Field(None, description="Section/category")
+    severity: Optional[str] = Field(None, description="Severity level")
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "question_id": "1.02",
+                "key": "1.02",
+                "description": "The facility has a business license for legal operation.",
+                "section": "Facility Profile",
+                "severity": None,
+            }
+        }
+    )
+
+
+class SlcpQuestion(BaseModel):
+    """SLCP (Social & Labor Convergence Program) question."""
+
+    slcp_key: str = Field(..., description="Unique SLCP key (e.g. 'fp-oc-1')")
+    slcp_number: Optional[str] = Field(None, description="SLCP question number (e.g. 'FP-OPE-1')")
+    question: str = Field(..., description="Full text of the SLCP question")
+    section: Optional[str] = Field(None, description="Section/category")
+    subsection: Optional[str] = Field(None, description="Subsection/topic")
+    category: Optional[str] = Field(None, description="Category")
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "slcp_key": "fp-oc-1",
+                "slcp_number": "FP-OPE-1",
+                "question": "Operating license/registration is available and up to date",
+                "section": "FACILITY PROFILE",
+                "subsection": "Operating Licenses",
+                "category": None,
+            }
+        }
+    )
+
+
+class Candidate(BaseModel):
+    """A candidate SLCP question retrieved during semantic search."""
+
+    slcp_key: str = Field(..., description="SLCP key")
+    question: str = Field(..., description="SLCP question text")
+    score: float = Field(..., ge=0.0, le=1.0, description="Cosine similarity score (0-1)")
+    rank: int = Field(..., ge=1, description="Rank in retrieval results (1-indexed)")
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "slcp_key": "fp-oc-1",
+                "question": "Operating license/registration is available and up to date",
+                "score": 0.92,
+                "rank": 1,
+            }
+        }
+    )
+
+
+class MappingSuggestion(BaseModel):
+    """LLM-generated suggestion for RSC → SLCP mapping."""
+
+    rsc_question_id: str = Field(..., description="RSC question ID")
+    rsc_question_text: str = Field(..., description="RSC question text")
+
+    # Top candidate matches (1:many allowed)
+    suggested_mappings: List[str] = Field(
+        ..., description="List of suggested SLCP keys, ranked by LLM confidence"
+    )
+
+    # Per mapping: LLM confidence and rationale
+    confidences: dict = Field(
+        ..., description="Dict mapping SLCP key → confidence score (0-1)"
+    )
+    rationale: str = Field(
+        ..., description="LLM's explanation of why these mappings were chosen"
+    )
+
+    # Draft mapping rule fields (minimal for POC)
+    draft_compliant_answer: Optional[str] = Field(
+        None, description="Draft mapping: compliant answer (e.g. 'Yes')"
+    )
+    draft_noncompliant_answer: Optional[str] = Field(
+        None, description="Draft mapping: non-compliant answer (e.g. 'No')"
+    )
+    draft_match_type: Optional[str] = Field(
+        None, description="Draft mapping: match type (e.g. 'EXACT', 'CONTAINS')"
+    )
+
+    # Metadata
+    timestamp: str = Field(..., description="ISO 8601 timestamp when suggestion was generated")
+    model_id: Optional[str] = Field(None, description="LLM model ID used")
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "rsc_question_id": "1.02",
+                "rsc_question_text": "The facility has a business license for legal operation.",
+                "suggested_mappings": ["fp-oc-1"],
+                "confidences": {"fp-oc-1": 0.95},
+                "rationale": "Direct match: both ask about business/operating license validity.",
+                "draft_compliant_answer": "Yes",
+                "draft_noncompliant_answer": "No",
+                "draft_match_type": "EXACT",
+                "timestamp": "2026-06-03T12:00:00Z",
+                "model_id": "amazon.titan-embed-text-v2:0",
+            }
+        }
+    )
+
+
+class EvaluationResult(BaseModel):
+    """Result of evaluating a suggestion against ground truth."""
+
+    rsc_question_id: str = Field(..., description="RSC question ID")
+    ground_truth_slcp_key: str = Field(..., description="Ground truth SLCP key")
+    suggested_slcp_keys: List[str] = Field(
+        ..., description="LLM's suggested SLCP keys (ranked)"
+    )
+    hit: bool = Field(
+        ..., description="True if ground truth is in suggested mappings"
+    )
+    rank_if_hit: Optional[int] = Field(
+        None, description="Rank of ground truth in suggestions (if hit=True)"
+    )
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "rsc_question_id": "1.02",
+                "ground_truth_slcp_key": "fp-oc-1",
+                "suggested_slcp_keys": ["fp-oc-1", "fp-oc-2"],
+                "hit": True,
+                "rank_if_hit": 1,
+            }
+        }
+    )
+
+
+class ExcelColumnMap(BaseModel):
+    """Configuration for mapping Excel columns to question fields."""
+
+    id_column: int = Field(0, description="Column index for ID (0-based)")
+    question_column: int = Field(1, description="Column index for question text")
+    section_column: Optional[int] = Field(None, description="Column index for section (optional)")
+    subsection_column: Optional[int] = Field(None, description="Column index for subsection (optional)")
+    skip_rows: int = Field(0, description="Number of header rows to skip")
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "id_column": 0,
+                "question_column": 1,
+                "section_column": 2,
+                "subsection_column": 3,
+                "skip_rows": 1,
+            }
+        }
+    )
