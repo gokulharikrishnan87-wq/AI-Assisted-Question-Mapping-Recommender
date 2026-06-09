@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, field_validator
 
 from mapper_copilot.core.suggester import Suggester
 from mapper_copilot.models import Mapping
-from mapper_copilot.providers.embeddings import HashingEmbedder
+from mapper_copilot.providers.embeddings import create_embedding_provider_from_settings
 from mapper_copilot.providers.llm import MockLLM
 from mapper_copilot.providers.vector_store import NumpyVectorStore
 
@@ -90,7 +90,7 @@ class BatchSuggestResponse(BaseModel):
 
 
 def _build_suggester() -> Suggester:
-    embedder = HashingEmbedder()
+    embedder = create_embedding_provider_from_settings()
     vector_store = NumpyVectorStore()
     vector_store.index(
         vectors=embedder.batch_embed(DEFAULT_SOURCE_CANDIDATES),

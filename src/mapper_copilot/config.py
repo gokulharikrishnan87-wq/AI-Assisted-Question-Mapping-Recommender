@@ -30,7 +30,18 @@ class Settings(BaseSettings):
     vector_store_type: str = "numpy"  # numpy | faiss | pgvector
     retrieve_top_k: int = 10
     retrieve_threshold: float = 0.5
-    
+
+    # Hybrid retrieval configuration
+    k_retrieve: int = 40  # Number of candidates to retrieve from hybrid search (dense + BM25)
+    use_bm25: bool = True  # Enable BM25 lexical retrieval in hybrid search
+    section_prior_weight: float = 0.1  # Weight for same-section boost (0.0 to disable)
+
+    # Reranker configuration (optional second-stage refinement)
+    reranker: str = "none"  # none | llm | local
+    reranker_model: str = "claude-sonnet-4-6"  # LLM: claude model | Local: cross-encoder model
+    cross_encoder_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"  # For reranker=local
+    anthropic_api_key: Optional[str] = None
+
     # Data paths
     slcp_questions_file: str = "data/slcp_questions.xlsx"
     rsc_questions_file: str = "data/rsc_questions.xlsx"

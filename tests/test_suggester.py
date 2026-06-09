@@ -247,3 +247,199 @@ def test_suggest_batch_preserves_order(populated_store, embedding_provider, cand
         candidate_questions[2],
         candidate_questions[0],
     ]
+
+
+# ============================================================================
+# Hybrid Retrieval Integration Tests
+# ============================================================================
+
+
+class TestHybridRetrieval:
+    """Test suggester with hybrid retrieval (dense + BM25 + reranker)."""
+
+    @pytest.fixture
+    def slcp_corpus(self):
+        """SLCP test corpus with metadata."""
+        return [
+            {
+                "key": "ms-che-1",
+                "number": "MS-CHE-1",
+                "section": "MANAGEMENT SYSTEMS",
+                "subsection": "Chemical Management",
+                "question": "Does the facility have a chemical inventory list?",
+            },
+            {
+                "key": "hs-con-18",
+                "number": "HS-CON-18",
+                "section": "HEALTH & SAFETY",
+                "subsection": "Working Conditions",
+                "question": "Are workers at least 18 years old?",
+            },
+            {
+                "key": "hs-con-15",
+                "number": "HS-CON-15",
+                "section": "HEALTH & SAFETY",
+                "subsection": "Working Conditions",
+                "question": "Are workers at least 15 years old for light work?",
+            },
+            {
+                "key": "fp-ste-1",
+                "number": "FP-STE-1",
+                "section": "FACILITY PROFILE",
+                "subsection": "General",
+                "question": "Does the facility have a valid business license?",
+            },
+        ]
+
+    @pytest.fixture
+    def hybrid_components(self, slcp_corpus):
+        """Build hybrid retrieval components."""
+        from mapper_copilot.providers.embeddings import HashingEmbedder
+        from mapper_copilot.providers.vector_store import NumpyVectorStore
+        from mapper_copilot.providers.retrieval import BM25Index, HybridRetriever
+
+        embedder = HashingEmbedder(embedding_dim=128)
+
+        # Build vector store
+        slcp_texts = [item["question"] for item in slcp_corpus]
+        embeddings = embedder.batch_embed(slcp_texts)
+        metadata_list = [
+            {
+                "slcp_question": item["question"],
+                "key": item["key"],
+                "number": item["number"],
+                "section": item["section"],
+            }
+            for item in slcp_corpus
+        ]
+        vector_store = NumpyVectorStore()
+        vector_store.index(embeddings, metadata_list)
+
+        # Build BM25 index
+        bm25_corpus = [
+            f"{item['key']} {item['number']} {item['question']}"
+            for item in slcp_corpus
+        ]
+        doc_ids = list(range(len(slcp_corpus)))
+        bm25_index = BM25Index(bm25_corpus, doc_ids)
+
+        # Build retriever
+        retriever = HybridRetriever(
+            embedding_provider=embedder,
+            vector_store=vector_store,
+            bm25_index=bm25_index,
+            k_retrieve=4,
+            use_bm25=True,
+            section_prior_weight=0.1,
+        )
+
+        return embedder, retriever
+
+    def test_suggester_with_hybrid_retrieval(self, hybrid_components, slcp_corpus):
+        """Test suggester with hybrid retrieval (no reranker)."""
+        from mapper_copilot.core.suggester import Suggester
+
+        embedder, retriever = hybrid_components
+        llm = SpyLLM(
+            default_response=f"Best match: {slcp_corpus[3]['question']}. Confidence: high. Match the business license requirement."
+        )
+
+        suggester = Suggester(
+            embedding_provider=embedder,
+            llm_provider=llm,
+            retriever=retriever,
+            top_k=3,
+        )
+
+        # Call with RSC metadata
+        rsc_metadata = {
+            "section": "1. Business Ethics",
+            "lll_key": "1.01",
+            "reference_data": "Facility must have valid operating permits",
+        }
+        mapping = suggester.suggest("Does the facility have a business license?", rsc_metadata)
+
+        # Verify results
+        assert mapping.mapped_to == slcp_corpus[3]["question"]
+        assert len(mapping.source_candidates) <= 3
+        assert mapping.confidence == 0.8  # "high" -> 0.8
+
+    def test_suggester_with_hybrid_and_mock_reranker(self, hybrid_components, slcp_corpus):
+        """Test suggester with hybrid retrieval + mock reranker."""
+        from mapper_copilot.core.suggester import Suggester
+
+        embedder, retriever = hybrid_components
+        llm = SpyLLM(
+            default_response=f"Best match: {slcp_corpus[1]['question']}. Confidence: medium. Match age requirement."
+        )
+
+        # Mock reranker that just reverses order
+        class MockReranker:
+            def rerank(self, rsc_question, candidates, top_k=5):
+                return candidates[:top_k][::-1]  # Reverse order
+
+        reranker = MockReranker()
+
+        suggester = Suggester(
+            embedding_provider=embedder,
+            llm_provider=llm,
+            retriever=retriever,
+            reranker=reranker,
+            top_k=2,
+        )
+
+        rsc_metadata = {
+            "section": "2. Labor Standards",
+            "lll_key": "2.01",
+            "reference_data": "Minimum age 18",
+        }
+        mapping = suggester.suggest("Are workers at least 18 years old?", rsc_metadata)
+
+        # Verify reranker was used (reversed order)
+        assert len(mapping.source_candidates) == 2
+        assert mapping.confidence == 0.5  # "medium" -> 0.5
+
+    def test_suggester_hybrid_backward_compatibility(self, slcp_corpus):
+        """Test that suggester still works without metadata (backward compatibility)."""
+        from mapper_copilot.core.suggester import Suggester
+        from mapper_copilot.providers.embeddings import HashingEmbedder
+        from mapper_copilot.providers.vector_store import NumpyVectorStore
+        from mapper_copilot.providers.retrieval import BM25Index, HybridRetriever
+
+        embedder = HashingEmbedder(embedding_dim=128)
+
+        # Build minimal retriever
+        slcp_texts = [item["question"] for item in slcp_corpus]
+        embeddings = embedder.batch_embed(slcp_texts)
+        metadata_list = [
+            {"slcp_question": item["question"], "key": item["key"]}
+            for item in slcp_corpus
+        ]
+        vector_store = NumpyVectorStore()
+        vector_store.index(embeddings, metadata_list)
+
+        bm25_corpus = [item["question"] for item in slcp_corpus]
+        bm25_index = BM25Index(bm25_corpus, list(range(len(slcp_corpus))))
+
+        retriever = HybridRetriever(
+            embedding_provider=embedder,
+            vector_store=vector_store,
+            bm25_index=bm25_index,
+            k_retrieve=4,
+            use_bm25=True,
+        )
+
+        llm = SpyLLM(default_response="Best match: chemical inventory. Confidence: low.")
+
+        suggester = Suggester(
+            embedding_provider=embedder,
+            llm_provider=llm,
+            retriever=retriever,
+            top_k=2,
+        )
+
+        # Call WITHOUT metadata (should still work)
+        mapping = suggester.suggest("Does the facility track chemicals?")
+
+        assert len(mapping.source_candidates) <= 2
+        assert mapping.confidence == 0.3  # "low" -> 0.3

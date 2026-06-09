@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest:*)",
+      "Bash(pip install:*)",
+      "Bash(python -m pip install:*)",
+      "Bash(pkill:*)",
+      "Bash(python:*)",
+      "Bash(streamlit run:*)",
+      "Bash(lsof:*)",
+      "Bash(/Users/manju_na/opt/miniconda3/bin/python:*)",
+      "Bash(chmod:*)",
+      "Bash(python3:*)",
+      "Bash(ls:*)",
+      "Bash(curl:*)",
+      "Bash(pip3 install:*)",
+      "Bash(STREAMLIT_SERVER_HEADLESS=true streamlit run:*)",
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(ssh:*)",
+      "Bash(git remote set-url:*)"
+    ]
+  }
+}

@@ -156,3 +156,130 @@ class BedrockEmbedder(EmbeddingProvider):
             List of embeddings.
         """
         return [self.embed(text) for text in texts]
+
+
+class SentenceTransformerEmbedder(EmbeddingProvider):
+    """Local sentence-transformers embedding provider for offline operation.
+
+    Uses the sentence-transformers library to provide semantic embeddings
+    without requiring cloud API credentials.
+    """
+
+    def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
+        """Initialize SentenceTransformer embedder.
+
+        Args:
+            model_name: HuggingFace model name (default: all-MiniLM-L6-v2).
+        """
+        self.model_name = model_name
+        self._model = None
+        self._embedding_dim = None
+
+    def _get_model(self):
+        """Lazily initialize sentence-transformers model."""
+        if self._model is None:
+            try:
+                from sentence_transformers import SentenceTransformer
+
+                self._model = SentenceTransformer(self.model_name)
+            except ImportError:
+                raise RuntimeError(
+                    "sentence-transformers not installed. "
+                    "Install with: pip install 'mapper-copilot[local-embeddings]'"
+                )
+        return self._model
+
+    @property
+    def embedding_dim(self) -> int:
+        """Get embedding dimensionality from model."""
+        if self._embedding_dim is None:
+            model = self._get_model()
+            try:
+                self._embedding_dim = model.get_embedding_dimension()
+            except AttributeError:
+                self._embedding_dim = model.get_sentence_embedding_dimension()
+        return self._embedding_dim
+
+    def embed(self, text: str) -> np.ndarray:
+        """Embed text using local sentence-transformers model.
+
+        Args:
+            text: The text to embed.
+
+        Returns:
+            L2-normalized embedding array of dtype float32.
+        """
+        model = self._get_model()
+        embedding = model.encode(
+            text,
+            convert_to_numpy=True,
+            normalize_embeddings=True,
+        )
+        return embedding.astype(np.float32)
+
+    def batch_embed(self, texts: List[str]) -> List[np.ndarray]:
+        """Embed multiple texts using batch processing.
+
+        Args:
+            texts: List of text strings.
+
+        Returns:
+            List of L2-normalized embeddings.
+        """
+        model = self._get_model()
+        embeddings = model.encode(
+            texts,
+            convert_to_numpy=True,
+            normalize_embeddings=True,
+            batch_size=32,
+        )
+        return [emb.astype(np.float32) for emb in embeddings]
+
+
+def create_embedding_provider(
+    provider: str,
+    model_id: str = None,
+    embedding_dim: int = 384,
+) -> EmbeddingProvider:
+    """Create an embedding provider instance.
+
+    Args:
+        provider: Provider type ('mock', 'bedrock', or 'local').
+        model_id: Model identifier (provider-specific).
+        embedding_dim: Embedding dimension (only used for mock provider).
+
+    Returns:
+        Configured embedding provider instance.
+
+    Raises:
+        ValueError: If provider type is invalid.
+    """
+    if provider == "mock":
+        return HashingEmbedder(embedding_dim=embedding_dim)
+    elif provider == "bedrock":
+        if model_id is None:
+            model_id = "amazon.titan-embed-text-v1"
+        return BedrockEmbedder(model_id=model_id)
+    elif provider == "local":
+        if model_id is None:
+            model_id = "all-MiniLM-L6-v2"
+        return SentenceTransformerEmbedder(model_name=model_id)
+    else:
+        raise ValueError(
+            f"Invalid provider '{provider}'. Must be 'mock', 'bedrock', or 'local'"
+        )
+
+
+def create_embedding_provider_from_settings() -> EmbeddingProvider:
+    """Create embedding provider using global settings.
+
+    Returns:
+        Configured embedding provider based on settings.PROVIDER.
+    """
+    from mapper_copilot.config import settings
+
+    return create_embedding_provider(
+        provider=settings.provider,
+        model_id=settings.embedding_model_id,
+        embedding_dim=settings.embedding_dimension,
+    )
